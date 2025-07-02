@@ -1,199 +1,168 @@
-Azure Key Vault + Managed Identity – Ciclo de Vida de Secretos
+# 🔐 Azure Key Vault + Managed Identity – Ciclo de Vida de Secretos
 
-Objetivo:
+> **Objetivo:** Implementar un Key Vault protegido con RBAC y una VM Linux con Managed Identity que acceda a un secreto sin credenciales explícitas.
 
-Implementar un Key Vault protegido con RBAC y una VM Linux con Managed Identity que acceda a un secreto sin credenciales explícitas.
-Al completar, los estudiantes podrán:
+---
 
-Crear recursos Azure con Terraform y buenas prácticas FinOps.
+## 🧠 Aprenderás a:
 
-Configurar Key Vault para usar RBAC en lugar de Access Policies.
+- Crear recursos en Azure con Terraform y buenas prácticas FinOps.
+- Configurar Key Vault con control de acceso basado en roles (RBAC).
+- Asignar permisos tanto a usuario IaC como a la VM.
+- Gestionar el tiempo de propagación de RBAC con `time_sleep`.
+- Validar la lectura de secretos desde una VM usando Managed Identity (MSI).
 
-Asignar roles a usuario IaC y a la VM.
+---
 
-Gestionar tiempo de propagación RBAC con time_sleep.
+## 📚 Índice
 
-Validar el flujo de lectura de secretos desde la VM usando MSI.
+- [📋 Requisitos previos](#-requisitos-previos)
+- [📁 Estructura del proyecto](#-estructura-del-proyecto)
+- [📝 Descripción de archivos .tf](#-descripción-de-archivos-tf)
+- [🚀 Despliegue paso a paso](#-despliegue-paso-a-paso)
+- [🔍 Verificación y demostración](#-verificación-y-demostración)
+- [💸 Consideraciones FinOps](#-consideraciones-finops)
+- [🧹 Limpieza](#-limpieza)
+- [🔗 Referencias](#-referencias)
 
-Índice
+---
 
-Requisitos previos
+## 📋 Requisitos previos
 
-Estructura del proyecto
+| Herramienta     | Versión mínima | Sistema               |
+|-----------------|----------------|------------------------|
+| Terraform       | 1.7+           | WSL Ubuntu 24.04       |
+| Azure CLI       | 2.60+          |                       |
+| jq              | —              | (para parsear JSON)    |
+| Permisos Azure  | Contributor    | Subscripción activa    |
 
-Descripción de archivos .tf
+---
 
-Despliegue paso a paso
+## 📁 Estructura del proyecto
 
-Verificación y demostración
-
-Consideraciones FinOps
-
-Limpieza
-
-Referencias
-
-Requisitos previos
-
-WSL Ubuntu 24.04 LTS con:
-
-Terraform ≥ 1.7
-
-Azure CLI ≥ 2.60
-
-jq instalado (para parsear JSON)
-
-Permisos de Contributor en la suscripción Azure.
-
-Estructura del proyecto
-
+```
 azure-key-vault-managed-identity-ciclo-de-vida-de-secretos/
-├─ main.tf       # Definición RG, VNet, Key Vault, VM, roles, secreto, time_sleep
-├─ variables.tf  # Parámetros: región, prefijo, tags FinOps
-└─ outputs.tf    # URI del Vault, IP de VM, password admin
+├── main.tf         # Infraestructura principal
+├── variables.tf    # Variables: región, prefijo, etiquetas FinOps
+└── outputs.tf      # URI del Vault, IP de VM, password admin
+```
 
-Descripción de archivos .tf
+---
 
-main.tf
+## 📝 Descripción de archivos .tf
 
-# 1️⃣ Terraform & Providers
-#   - azurerm: crea recursos Azure
-#   - random: sufijo aleatorio
-#   - time: pausa para RBAC
-terraform { ... }
+### `main.tf`
 
-provider "azurerm" { features {} }
+- Terraform y providers (azurerm, random, time)
+- Key Vault con `enable_rbac_authorization = true`
+- Asignación de roles para usuario y VM
+- Recursos de red: VNet, Subnet, NIC
+- VM Linux con Managed Identity
+- Secreto de prueba
+- `time_sleep` para propagación de RBAC
 
-data "azurerm_client_config" "current" {}   # recoge tenant_id y object_id
+### `variables.tf`
 
-# 2️⃣ Resource Group
-resource "azurerm_resource_group" "rg" { ... }
+Variables como:
 
-# 3️⃣ Key Vault con RBAC
-resource "azurerm_key_vault" "kv" {
-  enable_rbac_authorization = true   # 🔑 habilita RBAC en data-plane
-  ...
-}
-
-# 4️⃣ Role Assignment para usuario IaC
-resource "azurerm_role_assignment" "iac_user_secrets" { ... }
-
-# ⏲️ time_sleep.wait_role: espera 60 s para la propagación del rol
-resource "time_sleep" "wait_role" { ... }
-
-# 5️⃣ Secreto de prueba (depende de time_sleep)
-resource "azurerm_key_vault_secret" "demo" { ... }
-
-# 6️⃣ VNet, Subnet, NIC
-resource "azurerm_virtual_network" "vnet" { ... }
-resource "azurerm_subnet" "subnet" { ... }
-resource "azurerm_network_interface" "nic" { ... }
-
-# 7️⃣ VM Linux con Managed Identity
-resource "azurerm_linux_virtual_machine" "vm" { ... identity { type = "SystemAssigned" } }
-
-# 8️⃣ Role Assignment Secrets User para la VM
-resource "azurerm_role_assignment" "vm_secrets" { ... }
-
-variables.tf
-
-variable "location" {
-  default = "eastus2"
-}
-variable "prefix" { default = "kvmi" }
-variable "tags_common" { type = map(string) default = {
-  environment = "lab"
-  owner       = "tu.email@example.com"
-  project     = "kv-managed-identity-lab"
-  cost_center = "demo"
+```hcl
+location  = "eastus2"
+prefix    = "kvmi"
+tags_common = {
+  environment  = "lab"
+  owner        = "tu.email@example.com"
+  project      = "kv-managed-identity-lab"
+  cost_center  = "demo"
   delete_after = "2025-07-01T23:59:00Z"
-} }
-
-outputs.tf
-
-output "key_vault_uri" {
-  value       = azurerm_key_vault.kv.vault_uri
-  description = "URI del Key Vault"
 }
-output "vm_private_ip" {
-  value       = azurerm_network_interface.nic.private_ip_address
-  description = "IP privada de la VM"
-}
-output "vm_admin_password" {
-  value       = random_password.vm_admin_pass.result
-  sensitive   = true
-  description = "Contraseña admin de la VM"
-}
+```
 
-Despliegue paso a paso
+### `outputs.tf`
 
-Login y suscripción
+Exporta:
 
+- URI del Key Vault
+- IP privada de la VM
+- Contraseña de administrador (sensible)
+
+---
+
+## 🚀 Despliegue paso a paso
+
+```bash
+# 1. Inicia sesión y selecciona tu suscripción
 az login --use-device-code
 az account show --query id -o tsv
 
-Inicializa Terraform
-
+# 2. Inicializa Terraform
 terraform init -upgrade
 
-Aplica
-
+# 3. Aplica la configuración
 terraform apply -auto-approve
+```
 
-Key Vault tarda ≈ 3 min.
+📌 Duración aproximada:
 
-Pausa RBAC 60 s.
+- Key Vault: 3 minutos
+- time_sleep: 1 minuto
+- Secreto y VM: 2 minutos
 
-Secreto y VM ≈ 2 min.
+---
 
-Verificación y demostración
+## 🔍 Verificación y demostración
 
-Extraer outputs
-
+```bash
+# Extraer valores
 VAULT_URI=$(terraform output -raw key_vault_uri)
 VM_IP=$(terraform output -raw vm_private_ip)
 VM_PASS=$(terraform output -raw vm_admin_password)
 
-Mostrar secreto desde CLI
-
+# Mostrar secreto desde CLI
 VAULT_NAME=${VAULT_URI#https://}
 VAULT_NAME=${VAULT_NAME%.vault.azure.net}
 az keyvault secret show --vault-name $VAULT_NAME --name demo-secret -o table
 
-SSH a la VM
-
+# Acceder a la VM por SSH
 ssh azureuser@$VM_IP
-# contraseña: $VM_PASS
+# Contraseña: $VM_PASS
 
-Obtener token MSI y leer secreto
-
+# Leer secreto desde la VM usando MSI
 TOKEN=$(curl -s -H Metadata:true \
   'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-15&resource=https://vault.azure.net' \
   | jq -r .access_token)
+
 curl -s -H "Authorization: Bearer $TOKEN" \
   "$VAULT_URI/secrets/demo-secret?api-version=7.3" | jq -r .value
 # → TopSecret123!
+```
 
-Consideraciones FinOps
+---
 
-Key Vault Standard: ~ $0.04 USD/día.
+## 💸 Consideraciones FinOps
 
-VM B1s (4 h demo): ~ $0.03 USD.
+| Recurso     | Costo aproximado |
+|-------------|------------------|
+| Key Vault   | $0.04 USD/día    |
+| VM B1s (4h) | $0.03 USD        |
+| **Total**   | ≤ $0.07 USD      |
 
-Total lab completo ≤ $0.07 USD.
+---
 
-Limpieza
+## 🧹 Limpieza
 
+```bash
 terraform destroy -auto-approve
-az group delete -n ${var.prefix}-rg --yes --no-wait
+az group delete -n kvmi-rg --yes --no-wait
+```
 
-Referencias
+---
 
-https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault
+## 🔗 Referencias
 
-https://www.finops.org/tagging-best-practices
+- [🔐 Key Vault (Terraform)](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault)
+- [🏷️ Etiquetado FinOps](https://www.finops.org/tagging-best-practices)
+- [🔁 Managed Identity Overview](https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview)
 
-https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/overview
+---
 
-📋 El ejercicio demuestra Zero-Trust, RBAC data-plane y etiquetado FinOps en Azure. 🎯
-
+📋 Este ejercicio demuestra buenas prácticas en **Zero-Trust**, acceso seguro con **RBAC en data-plane**, y cumplimiento de etiquetado **FinOps** en Azure. 🎯
